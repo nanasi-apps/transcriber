@@ -23,6 +23,49 @@ export interface TranscribeJobStatus {
   text: string | null
 }
 
+export interface MinutesWordTimestamp {
+  text: string
+  start: number
+  end: number
+}
+
+export interface MinutesUtterance {
+  speaker_id: string
+  start: number
+  end: number
+  text: string
+  words?: MinutesWordTimestamp[] | null
+}
+
+export interface MinutesResult {
+  utterances: MinutesUtterance[]
+  audio_duration: number
+  metadata: Record<string, unknown>
+}
+
+export interface MinutesRecord {
+  id: string
+  title: string
+  sourceFileName: string
+  savedAt: string
+  recordedAt: string | null
+  audioDuration: number
+  processingTime: number | null
+  result: MinutesResult
+  speakerNames: Record<string, string>
+}
+
+export interface SaveMinutesInput {
+  id?: string
+  title: string
+  sourceFileName: string
+  recordedAt: string | null
+  audioDuration: number
+  processingTime: number | null
+  result: MinutesResult
+  speakerNames: Record<string, string>
+}
+
 const api = {
   selectFile: (): Promise<string | null> => ipcRenderer.invoke('dialog:openFile'),
 
@@ -87,6 +130,15 @@ const api = {
       return false
     }
   },
+
+  listMinutes: (): Promise<MinutesRecord[]> => ipcRenderer.invoke('minutes:list'),
+
+  getMinutes: (id: string): Promise<MinutesRecord | null> => ipcRenderer.invoke('minutes:get', id),
+
+  saveMinutes: (payload: SaveMinutesInput): Promise<MinutesRecord> =>
+    ipcRenderer.invoke('minutes:save', payload),
+
+  deleteMinutes: (id: string): Promise<boolean> => ipcRenderer.invoke('minutes:delete', id),
 }
 
 export type ApiType = typeof api

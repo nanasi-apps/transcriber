@@ -2,6 +2,13 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import { type ChildProcess, spawn } from 'node:child_process'
 import { join } from 'node:path'
+import {
+  deleteMinutes,
+  getMinutes,
+  listMinutes,
+  saveMinutes,
+  type SaveMinutesInput,
+} from './minutesStore'
 
 let backendProcess: ChildProcess | null = null
 const manageBackendInElectron = process.env.BACKEND_MANAGED_EXTERNALLY !== 'true'
@@ -112,6 +119,22 @@ app.whenReady().then(() => {
       ],
     })
     return result.canceled ? null : result.filePaths[0]
+  })
+
+  ipcMain.handle('minutes:list', async () => {
+    return listMinutes()
+  })
+
+  ipcMain.handle('minutes:get', async (_, id: string) => {
+    return getMinutes(id)
+  })
+
+  ipcMain.handle('minutes:save', async (_, payload: SaveMinutesInput) => {
+    return saveMinutes(payload)
+  })
+
+  ipcMain.handle('minutes:delete', async (_, id: string) => {
+    return deleteMinutes(id)
   })
 
   createWindow()

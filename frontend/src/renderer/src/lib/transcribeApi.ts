@@ -25,6 +25,29 @@ export interface TranscriptionResult {
   }
 }
 
+export interface MinutesRecord {
+  id: string
+  title: string
+  sourceFileName: string
+  savedAt: string
+  recordedAt: string | null
+  audioDuration: number
+  processingTime: number | null
+  result: TranscriptionResult
+  speakerNames: Record<string, string>
+}
+
+export interface SaveMinutesInput {
+  id?: string
+  title: string
+  sourceFileName: string
+  recordedAt: string | null
+  audioDuration: number
+  processingTime: number | null
+  result: TranscriptionResult
+  speakerNames: Record<string, string>
+}
+
 export interface TranscribeJobStatus {
   job_id: string
   status: 'queued' | 'processing' | 'done' | 'error'
@@ -78,4 +101,20 @@ export async function transcribeUpload(file: File, options?: { align?: boolean }
 
 export async function transcribeStatus(jobId: string): Promise<TranscribeJobStatus> {
   return requestJson<TranscribeJobStatus>(`/api/jobs/${jobId}`)
+}
+
+export async function listMinutes(): Promise<MinutesRecord[]> {
+  return window.api.listMinutes()
+}
+
+export async function getMinutes(id: string): Promise<MinutesRecord | null> {
+  return window.api.getMinutes(id)
+}
+
+export async function saveMinutes(payload: SaveMinutesInput): Promise<MinutesRecord> {
+  return window.api.saveMinutes(payload)
+}
+
+export async function deleteMinutes(id: string): Promise<boolean> {
+  return window.api.deleteMinutes(id)
 }
