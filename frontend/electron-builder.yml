@@ -1,0 +1,15 @@
+appId: com.transcriber.app
+productName: Transcriber
+directories:
+  buildResources: build
+files:
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!electron.vite.config.*'
+  - '!{.env,.env.*,.npmrc,tsconfig*.json}'
+mac:
+  artifactName: '${productName}-${version}-${arch}.${ext}'
+  target:
+    - target: dmg
+      arch:
+        - arm64

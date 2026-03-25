@@ -1,0 +1,30 @@
+{
+  "plugins": ["typescript", "import", "vue"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn",
+    "nursery": "off"
+  },
+  "rules": {
+    "no-unused-vars": "warn",
+    "eqeqeq": "error",
+    "no-console": "warn",
+    "no-debugger": "error",
+    "import/no-duplicates": "error"
+  },
+  "overrides": [
+    {
+      "files": ["*.vue"],
+      "rules": {
+        "no-unused-vars": "off"
+      }
+    },
+    {
+      "files": ["src/main/**/*.ts", "src/preload/**/*.ts"],
+      "rules": {
+        "no-console": "off"
+      }
+    }
+  ],
+  "ignorePatterns": ["out/", "dist/", "node_modules/", "*.d.ts"]
+}

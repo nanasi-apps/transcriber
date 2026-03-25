@@ -1,0 +1,14 @@
+{
+  "files": ["src/main/**/*", "src/preload/**/*"],
+  "compilerOptions": {
+    "composite": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "outDir": "out/tsconfig.node.tsbuildinfo",
+    "skipLibCheck": true
+  },
+  "include": ["src/main/**/*", "src/preload/**/*", "electron.vite.config.*"]
+}

@@ -1,0 +1,41 @@
+[project]
+name = "transcriber"
+version = "0.2.0"
+description = "Speaker-attributed transcription pipeline: Whisper MLX + pyannote diarization"
+requires-python = ">=3.12"
+dependencies = [
+    # --- MVP pipeline core ---
+    "mlx-audio>=0.4.0; platform_system == 'Darwin' and platform_machine == 'arm64'",
+    "mlx-whisper>=0.4.3; platform_system == 'Darwin' and platform_machine == 'arm64'",
+    "nagisa>=0.2.11; platform_system == 'Darwin' and platform_machine == 'arm64'",
+    "mlx>=0.26.0; platform_system == 'Darwin' and platform_machine == 'arm64'",
+    "pyannote.audio>=3.3.0",
+    "torch>=2.2.0",
+    "torchaudio>=2.2.0",
+    "torchcodec>=0.11",
+    "soundfile>=0.12.0",
+    "numpy>=1.26.0",
+    # --- Audio conversion ---
+    "ffmpeg-python>=0.2.0",
+    # --- Existing server (kept for backward compat) ---
+    "fastapi>=0.115.0",
+    "python-multipart>=0.0.20",
+    "uvicorn[standard]>=0.34.0",
+    "pydantic>=2.0.0",
+]
+
+[project.scripts]
+transcriber-server = "transcriber.server:start"
+transcribe = "transcriber.cli:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
