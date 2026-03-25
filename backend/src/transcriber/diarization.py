@@ -196,7 +196,10 @@ class DiarizationEngine:
         # live under ``speaker_diarization``. Older releases returned an
         # Annotation directly. Support both shapes.
         raw_segments: list[tuple[str, float, float]] = []
-        if hasattr(output, "speaker_diarization"):
+        if hasattr(output, "exclusive_speaker_diarization"):
+            for turn, speaker in output.exclusive_speaker_diarization:
+                raw_segments.append((str(speaker), turn.start, turn.end))
+        elif hasattr(output, "speaker_diarization"):
             for turn, speaker in output.speaker_diarization:
                 raw_segments.append((str(speaker), turn.start, turn.end))
         elif hasattr(output, "itertracks"):

@@ -26,7 +26,10 @@ export interface TranscribeJobStatus {
 const api = {
   selectFile: (): Promise<string | null> => ipcRenderer.invoke('dialog:openFile'),
 
-  transcribe: async (filePath: string, options: TranscribeOptions = {}): Promise<TranscribeResult> => {
+  transcribe: async (
+    filePath: string,
+    options: TranscribeOptions = {},
+  ): Promise<TranscribeResult> => {
     const response = await fetch(`${BACKEND_URL}/api/transcribe`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

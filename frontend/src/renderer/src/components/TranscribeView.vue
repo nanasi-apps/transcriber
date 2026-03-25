@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  type ComponentPublicInstance,
+  watch,
+} from 'vue'
 import {
   healthCheck,
   transcribeStatus,
@@ -14,14 +22,25 @@ const isTranscribing = ref(false)
 const errorMessage = ref('')
 const backendReady = ref(false)
 const isDragOver = ref(false)
+const autoStartRequested = ref(false)
 const progress = ref(0)
 const progressStage = ref('')
 const progressMessage = ref('Starting...')
 const processingTime = ref<number | null>(null)
 const mediaUrl = ref('')
 const currentTime = ref(0)
+const selectedAt = ref<Date | null>(null)
 const utteranceRefs = ref<HTMLElement[]>([])
 const mediaElement = ref<HTMLMediaElement | null>(null)
+const speakerNames = ref<Record<string, string>>({})
+
+const dateTimeFormatter = new Intl.DateTimeFormat('ja-JP', {
+  year: 'numeric',
+  month: 'short',
+  day: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+})
 
 onMounted(async () => {
   for (let i = 0; i < 30; i++) {
@@ -42,6 +61,15 @@ const isVideoFile = computed(() => {
   if (selectedFile.value.type.startsWith('video/')) return true
   return /\.(mp4|webm|mov|m4v)$/i.test(selectedFile.value.name)
 })
+const meetingTitle = computed(() => {
+  if (!selectedFile.value) return '議事録ビュー'
+  const baseName = selectedFile.value.name.replace(/\.[^.]+$/, '')
+  return baseName || selectedFile.value.name
+})
+const recordedAtLabel = computed(() => {
+  if (!selectedAt.value) return 'ローカルファイルを選択してください'
+  return dateTimeFormatter.format(selectedAt.value)
+})
 const activeUtteranceIndex = computed(() => {
   const time = currentTime.value
   return utterances.value.findIndex((utt, index) => {
@@ -53,6 +81,24 @@ const activeUtteranceIndex = computed(() => {
 const stageTimings = computed<Record<string, number>>(() => {
   const timings = result.value?.metadata?.timings
   return timings && typeof timings === 'object' ? timings : {}
+})
+const statusBadge = computed(() => {
+  if (errorMessage.value) {
+    return { label: 'エラー', tone: 'danger', detail: errorMessage.value }
+  }
+  if (!backendReady.value) {
+    return { label: 'バックエンド起動中', tone: 'warning', detail: '処理サーバーを確認しています' }
+  }
+  if (isTranscribing.value) {
+    return { label: '処理中', tone: 'info', detail: progressMessage.value }
+  }
+  if (hasResult.value) {
+    return { label: '作成完了', tone: 'success', detail: '議事録を確認できます' }
+  }
+  if (selectedFile.value) {
+    return { label: '準備完了', tone: 'neutral', detail: '文字起こしを開始できます' }
+  }
+  return { label: '未開始', tone: 'neutral', detail: 'ファイルをアップロードしてください' }
 })
 
 onBeforeUnmount(() => {
@@ -79,11 +125,87 @@ const speakerColorMap = computed<Record<string, string>>(() => {
   })
   return map
 })
+const speakerSummaries = computed(() => {
+  const stats = new Map<string, { id: string; count: number; duration: number; color: string }>()
+  utterances.value.forEach((utterance) => {
+    const existing = stats.get(utterance.speaker_id) ?? {
+      id: utterance.speaker_id,
+      count: 0,
+      duration: 0,
+      color: speakerColorMap.value[utterance.speaker_id] ?? SPEAKER_COLORS[0],
+    }
+    existing.count += 1
+    existing.duration += Math.max(utterance.end - utterance.start, 0)
+    stats.set(utterance.speaker_id, existing)
+  })
+  return [...stats.values()].sort((left, right) => right.duration - left.duration)
+})
+
+function displaySpeakerName(speakerId: string): string {
+  const customName = speakerNames.value[speakerId]?.trim()
+  return customName || speakerId
+}
+
+const summaryStats = computed(() => [
+  {
+    label: '発話数',
+    value: hasResult.value ? String(utterances.value.length) : '--',
+    hint: hasResult.value ? 'utterances' : '未生成',
+  },
+  {
+    label: '話者数',
+    value: hasResult.value ? String(speakerSummaries.value.length) : '--',
+    hint: hasResult.value ? 'speakers' : '未生成',
+  },
+  {
+    label: '収録時間',
+    value: result.value ? formatTime(result.value.audio_duration) : '--',
+    hint: result.value ? 'audio length' : 'ファイル待機中',
+  },
+  {
+    label: '処理時間',
+    value: processingTime.value !== null ? formatProcessingTime(processingTime.value) : '--',
+    hint: processingTime.value !== null ? 'pipeline total' : '未計測',
+  },
+])
+const fileFacts = computed(() => {
+  if (!selectedFile.value) return []
+  const extension = selectedFile.value.name.split('.').pop()?.toUpperCase() ?? 'UNKNOWN'
+  return [
+    { label: 'ファイル名', value: selectedFile.value.name },
+    { label: '形式', value: selectedFile.value.type || extension },
+    { label: 'サイズ', value: formatBytes(selectedFile.value.size) },
+  ]
+})
+const processingSteps = computed(() => [
+  { key: 'audio_prep', label: '音声準備', value: timingValue('audio_prep') },
+  { key: 'asr', label: '文字起こし', value: timingValue('asr') },
+  { key: 'diarization', label: '話者分離', value: timingValue('diarization') },
+  { key: 'alignment', label: 'タイムライン補正', value: timingValue('alignment') },
+  { key: 'merge', label: '表示用整形', value: timingValue('merge') },
+])
+const summaryHighlights = computed(() =>
+  utterances.value
+    .filter((utterance) => utterance.text.trim().length > 0)
+    .slice(0, 4)
+    .map((utterance, index) => ({
+      id: `${utterance.speaker_id}-${utterance.start}-${index}`,
+      speakerId: utterance.speaker_id,
+      start: utterance.start,
+      end: utterance.end,
+      text: truncateText(utterance.text, 96),
+    })),
+)
 
 function formatTime(seconds: number): string {
-  const m = Math.floor(seconds / 60)
-  const s = Math.floor(seconds % 60)
-  return `${m}:${s.toString().padStart(2, '0')}`
+  const totalSeconds = Math.max(0, Math.floor(seconds))
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const secs = totalSeconds % 60
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+  }
+  return `${minutes}:${secs.toString().padStart(2, '0')}`
 }
 
 function formatProcessingTime(seconds: number): string {
@@ -91,6 +213,24 @@ function formatProcessingTime(seconds: number): string {
   const m = Math.floor(seconds / 60)
   const s = seconds % 60
   return `${m}m ${s.toFixed(1)}s`
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  const units = ['KB', 'MB', 'GB']
+  let value = bytes / 1024
+  let unitIndex = 0
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024
+    unitIndex += 1
+  }
+  return `${value.toFixed(value >= 100 ? 0 : 1)} ${units[unitIndex]}`
+}
+
+function truncateText(text: string, maxLength: number): string {
+  const compact = text.replace(/\s+/g, ' ').trim()
+  if (compact.length <= maxLength) return compact
+  return `${compact.slice(0, maxLength - 1)}...`
 }
 
 function timingValue(key: string): number | null {
@@ -114,9 +254,16 @@ function stageLabel(stage: string): string {
 function setFile(file: File | null): void {
   clearMediaUrl()
   selectedFile.value = file
+  autoStartRequested.value = !!file
   result.value = null
+  speakerNames.value = {}
   errorMessage.value = ''
   currentTime.value = 0
+  progress.value = 0
+  progressStage.value = ''
+  progressMessage.value = 'Starting...'
+  processingTime.value = null
+  selectedAt.value = file ? new Date() : null
   if (file) {
     mediaUrl.value = URL.createObjectURL(file)
   }
@@ -151,6 +298,7 @@ function handleDragLeave(): void {
 async function startTranscription(): Promise<void> {
   if (!selectedFile.value) return
 
+  autoStartRequested.value = false
   isTranscribing.value = true
   errorMessage.value = ''
   result.value = null
@@ -190,8 +338,21 @@ async function startTranscription(): Promise<void> {
 function resultAsText(): string {
   if (!result.value) return ''
   return result.value.utterances
-    .map((u) => `[${u.speaker_id}] (${formatTime(u.start)} - ${formatTime(u.end)})\n${u.text}`)
+    .map((u) => `[${displaySpeakerName(u.speaker_id)}] (${formatTime(u.start)} - ${formatTime(u.end)})\n${u.text}`)
     .join('\n\n')
+}
+
+function updateSpeakerName(speakerId: string, value: string): void {
+  speakerNames.value = {
+    ...speakerNames.value,
+    [speakerId]: value,
+  }
+}
+
+function onSpeakerNameInput(speakerId: string, event: Event): void {
+  const target = event.target
+  if (!(target instanceof HTMLInputElement)) return
+  updateSpeakerName(speakerId, target.value)
 }
 
 async function copyToClipboard(): Promise<void> {
@@ -214,13 +375,23 @@ function seekTo(seconds: number): void {
   void media.play().catch(() => undefined)
 }
 
-function setUtteranceRef(element: Element | null, index: number): void {
+function setUtteranceRef(element: Element | ComponentPublicInstance | null, index: number): void {
   if (!element) return
-  utteranceRefs.value[index] = element as HTMLElement
+  const resolvedElement = '$el' in element ? element.$el : element
+  if (!(resolvedElement instanceof HTMLElement)) return
+  utteranceRefs.value[index] = resolvedElement
 }
 
 watch(utterances, () => {
   utteranceRefs.value = []
+})
+
+watch(speakerSummaries, (summaries) => {
+  const nextNames: Record<string, string> = {}
+  summaries.forEach((speaker) => {
+    nextNames[speaker.id] = speakerNames.value[speaker.id] ?? ''
+  })
+  speakerNames.value = nextNames
 })
 
 watch(activeUtteranceIndex, async (index, prev) => {
@@ -228,447 +399,664 @@ watch(activeUtteranceIndex, async (index, prev) => {
   await nextTick()
   utteranceRefs.value[index]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
 })
+
+watch([selectedFile, backendReady], ([file, ready]) => {
+  if (!file || !ready || isTranscribing.value || !autoStartRequested.value) return
+  autoStartRequested.value = false
+  void startTranscription()
+})
 </script>
 
 <template>
-  <div class="shell">
-    <section class="uploader-card">
-      <div class="hero-copy">
-        <p class="eyebrow">Transcriber</p>
-        <h1>音声ファイルをアップロードするだけ</h1>
-        <p class="lede">話者分離付き文字起こし結果を、そのまま見やすいビューで確認できます。</p>
-      </div>
-
-      <div v-if="!backendReady" class="status-pill status-wait">Starting backend...</div>
-      <div v-else class="status-pill status-ready">Ready</div>
-
-      <label
-        class="drop-zone"
-        :class="{ drag: isDragOver, disabled: !backendReady || isTranscribing }"
-        @drop.prevent="handleDrop"
-        @dragover="handleDragOver"
-        @dragleave="handleDragLeave"
-      >
-        <input
-          class="hidden-input"
-          type="file"
-          accept=".mp4,.mp3,.wav,.m4a,.webm,.ogg,.flac"
-          :disabled="!backendReady || isTranscribing"
-          @change="onFileInput"
-        />
-        <div class="drop-content">
-          <p v-if="!selectedFile" class="drop-title">ファイルを選択またはドロップ</p>
-          <p v-else class="drop-title">{{ selectedFile.name }}</p>
-          <p class="drop-subtitle">対応形式: mp4 / mp3 / wav / m4a / webm / ogg / flac</p>
-        </div>
-      </label>
-
-      <button
-        class="primary"
-        :disabled="!selectedFile || !backendReady || isTranscribing"
-        @click="startTranscription"
-      >
-        {{ isTranscribing ? 'Transcribing...' : 'Upload And Transcribe' }}
-      </button>
-
-      <div v-if="isTranscribing" class="progress-wrap">
-        <div class="progress-meta">
-          <span>{{ progressMessage }}</span>
-          <span>{{ progress }}%</span>
-        </div>
-        <div class="progress-bar">
-          <div class="progress-fill" :style="{ width: `${progress}%` }" />
-        </div>
-        <div v-if="processingTime !== null" class="progress-timing">
-          Processing time: {{ formatProcessingTime(processingTime) }}
+  <div class="detail-content">
+    <div class="detail-header">
+      <div class="detail-title">
+        <h1 class="detail-heading">{{ meetingTitle }}</h1>
+        <div class="detail-meta">
+          <span>{{ recordedAtLabel }}</span>
+          <span v-if="selectedFile">{{ selectedFile.name }}</span>
+          <span class="status-badge" :class="`status-${statusBadge.tone}`">{{
+            statusBadge.label
+          }}</span>
         </div>
       </div>
 
-      <div v-if="errorMessage" class="notice error">{{ errorMessage }}</div>
-
-      <!-- Summary after transcription -->
-      <div v-if="hasResult && result" class="notice info">
-        {{ utterances.length }} utterances
-        &middot; {{ Object.keys(speakerColorMap).length }} speakers
-        &middot; {{ formatTime(result.audio_duration) }} total
-        <span v-if="processingTime !== null">&middot; Processing time {{ formatProcessingTime(processingTime) }}</span>
-        <span v-if="timingValue('asr') !== null">&middot; ASR {{ formatProcessingTime(timingValue('asr')!) }}</span>
-        <span v-if="timingValue('diarization') !== null">&middot; Diarization {{ formatProcessingTime(timingValue('diarization')!) }}</span>
-        <span v-if="timingValue('alignment') !== null && timingValue('alignment')! > 0">&middot; Alignment {{ formatProcessingTime(timingValue('alignment')!) }}</span>
+      <div class="header-actions">
+        <label class="action-button button-secondary">
+          ファイルを選択
+          <input
+            class="hidden-input"
+            type="file"
+            accept=".mp4,.mp3,.wav,.m4a,.webm,.ogg,.flac"
+            :disabled="!backendReady || isTranscribing"
+            @change="onFileInput"
+          />
+        </label>
       </div>
-    </section>
+    </div>
 
-    <section class="viewer-card">
-      <div class="viewer-header">
-        <div>
-          <p class="eyebrow">Result Viewer</p>
-          <h2>Transcript</h2>
+    <div v-if="errorMessage" class="page-banner banner-danger">{{ errorMessage }}</div>
+    <div v-else-if="!backendReady" class="page-banner banner-warning">
+      バックエンドの起動を待っています。起動後、ファイル選択やドロップで自動的に議事録作成を開始します。
+    </div>
+
+    <div class="content-section">
+      <!-- Left: Summary / Info Card (mimicking CF's SummaryCard.vue) -->
+      <div class="summary-card">
+        <div class="card-header">
+          <h2 class="card-title"><span>📝</span> 要約・情報</h2>
+          <button
+            class="action-button button-ghost button-sm"
+            :disabled="!hasResult"
+            @click="copyToClipboard"
+          >
+            コピー
+          </button>
         </div>
-        <button class="ghost" :disabled="!hasResult" @click="copyToClipboard">Copy</button>
-      </div>
+        <div class="summary-content">
+          <!-- Dropzone -->
+          <label
+            class="drop-zone"
+            :class="{ drag: isDragOver, disabled: !backendReady || isTranscribing }"
+            @drop.prevent="handleDrop"
+            @dragover="handleDragOver"
+            @dragleave="handleDragLeave"
+          >
+            <input
+              class="hidden-input"
+              type="file"
+              accept=".mp4,.mp3,.wav,.m4a,.webm,.ogg,.flac"
+              :disabled="!backendReady || isTranscribing"
+              @change="onFileInput"
+            />
+            <div class="drop-content">
+              <p v-if="!selectedFile" class="drop-title">音声・動画ファイルをドロップ</p>
+              <p v-else class="drop-title">{{ selectedFile.name }}</p>
+              <p class="drop-subtitle">対応形式: mp4 / mp3 / wav / m4a ... 選択後、自動で開始します。</p>
+            </div>
+          </label>
 
-      <div v-if="hasMedia" class="player-shell">
-        <div class="player-meta">
-          <span>{{ selectedFile?.name }}</span>
-          <span>{{ formatTime(currentTime) }} / {{ result ? formatTime(result.audio_duration) : '--:--' }}</span>
-        </div>
-        <video
-          v-if="isVideoFile"
-          ref="mediaElement"
-          class="media-player"
-          :src="mediaUrl"
-          controls
-          preload="metadata"
-          @timeupdate="onMediaTimeUpdate"
-        />
-        <audio
-          v-else
-          ref="mediaElement"
-          class="media-player audio-player"
-          :src="mediaUrl"
-          controls
-          preload="metadata"
-          @timeupdate="onMediaTimeUpdate"
-        />
-      </div>
-
-      <div v-if="!hasResult" class="empty-state">
-        アップロード後、話者分離付き文字起こし結果がここに表示されます。
-      </div>
-
-      <div v-else class="transcript-list">
-        <article
-          v-for="(utt, idx) in utterances"
-          :key="idx"
-          :ref="(el) => setUtteranceRef(el, idx)"
-          class="segment-card"
-          :class="{ active: idx === activeUtteranceIndex, clickable: hasMedia }"
-          @click="seekTo(utt.start)"
-        >
-          <div class="segment-meta">
-            <span
-              class="speaker-badge"
-              :style="{ background: speakerColorMap[utt.speaker_id] }"
-            >
-              {{ utt.speaker_id }}
-            </span>
-            <span class="timestamp">{{ formatTime(utt.start) }} - {{ formatTime(utt.end) }}</span>
+          <!-- Progress -->
+          <div v-if="isTranscribing" class="progress-container">
+            <div class="flex-between">
+              <span class="text-sm text-gray-600">{{ progressMessage }}</span>
+              <span class="text-sm font-bold">{{ progress }}%</span>
+            </div>
+            <div class="progress-bar">
+              <div class="progress-fill" :style="{ width: `${progress}%` }" />
+            </div>
+            <p v-if="processingTime !== null" class="text-xs text-gray-500 mt-2">
+              経過時間: {{ formatProcessingTime(processingTime) }}
+            </p>
           </div>
-          <p class="segment-text">{{ utt.text }}</p>
-        </article>
+
+          <!-- Simple Text Summary -->
+          <div v-if="hasResult" class="simple-summary prose">
+            <p>
+              <strong>ファイル:</strong> {{ selectedFile?.name }} ({{
+                selectedFile ? formatBytes(selectedFile.size) : ''
+              }})
+            </p>
+            <p>
+              <strong>収録時間:</strong> {{ result ? formatTime(result.audio_duration) : '--' }}
+            </p>
+            <p>
+              <strong>処理時間:</strong>
+              {{ processingTime !== null ? formatProcessingTime(processingTime) : '--' }}
+            </p>
+            <p><strong>発話数:</strong> {{ utterances.length }} 件</p>
+            <p><strong>話者数:</strong> {{ speakerSummaries.length }} 名</p>
+
+            <hr class="my-4" />
+
+            <h3>検出された話者</h3>
+            <ul class="speaker-simple-list">
+              <li v-for="speaker in speakerSummaries" :key="speaker.id">
+                <div class="speaker-simple-row">
+                  <span class="speaker-dot" :style="{ backgroundColor: speaker.color }"></span>
+                  <div class="speaker-simple-meta">
+                    <strong>{{ speaker.id }}</strong>
+                    <span>{{ speaker.count }}発話 ({{ formatTime(speaker.duration) }})</span>
+                  </div>
+                </div>
+                <input
+                  class="speaker-name-input"
+                  type="text"
+                  :value="speakerNames[speaker.id] ?? ''"
+                  :placeholder="`${speaker.id} の表示名`"
+                  @input="onSpeakerNameInput(speaker.id, $event)"
+                />
+              </li>
+            </ul>
+          </div>
+          <div v-else-if="!isTranscribing" class="empty-text">
+            ここにファイル情報や文字起こしのサマリーが表示されます。
+          </div>
+        </div>
       </div>
-    </section>
+
+      <!-- Right: Media and Transcript -->
+      <div class="content-right">
+        <!-- Media Player (mimicking CF's MediaPlayer.vue) -->
+        <div class="media-player-container">
+          <div v-if="hasMedia">
+            <video
+              v-if="isVideoFile"
+              ref="mediaElement"
+              class="media-player"
+              :src="mediaUrl"
+              controls
+              playsinline
+              @timeupdate="onMediaTimeUpdate"
+            />
+            <audio
+              v-else
+              ref="mediaElement"
+              class="media-player audio-player"
+              :src="mediaUrl"
+              controls
+              playsinline
+              @timeupdate="onMediaTimeUpdate"
+            />
+          </div>
+          <div v-else class="media-empty" aria-hidden="true"></div>
+        </div>
+
+        <!-- Transcript Card (mimicking CF's TranscriptCard.vue) -->
+        <div class="transcript-container">
+          <h2 class="transcript-header"><span class="header-icon">💬</span> 文字起こし</h2>
+          <div class="transcript-body">
+            <div v-if="!hasResult" class="text-gray-500 p-4">
+              アップロード後、話者分離付き文字起こし結果がここに表示されます。
+            </div>
+            <template v-else>
+              <div
+                v-for="(utt, idx) in utterances"
+                :key="`${utt.speaker_id}-${utt.start}-${idx}`"
+                :ref="(el) => setUtteranceRef(el, idx)"
+                class="transcript-segment"
+                :class="{ active: idx === activeUtteranceIndex }"
+                @click="seekTo(utt.start)"
+              >
+                <span class="timestamp-btn" :class="{ active: idx === activeUtteranceIndex }">
+                  {{ formatTime(utt.start) }}~{{ formatTime(utt.end) }}
+                </span>
+                <span class="speaker-name" :style="{ color: speakerColorMap[utt.speaker_id] }"
+                  >[{{ displaySpeakerName(utt.speaker_id) }}]</span
+                >
+                <span class="segment-text">{{ utt.text }}</span>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.shell {
-  min-height: 100%;
-  display: grid;
-  grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
-  gap: 1rem;
-  padding: 1rem;
-}
-
-.uploader-card,
-.viewer-card {
-  background: rgba(255, 255, 255, 0.76);
-  backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.75);
-  border-radius: 28px;
-  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.08);
-}
-
-.uploader-card {
-  padding: 1.5rem;
+/* App Layout */
+.detail-content {
+  height: 100vh;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 1.5rem;
+  padding: 1.5rem 2rem;
+  overflow: hidden;
+  color: #1a1a1a;
 }
 
-.viewer-card {
-  padding: 1.5rem;
-  min-height: 0;
+/* Header (mimics detail-header in CF) */
+.detail-header {
   display: flex;
   flex-direction: column;
-}
-
-.player-shell {
-  margin-bottom: 1rem;
-  padding: 0.85rem;
-  border-radius: 22px;
-  background: linear-gradient(180deg, rgba(226, 232, 240, 0.45), rgba(248, 250, 252, 0.9));
-  border: 1px solid rgba(148, 163, 184, 0.25);
-}
-
-.player-meta {
-  display: flex;
   justify-content: space-between;
-  gap: 0.75rem;
-  margin-bottom: 0.65rem;
-  font-size: 0.8rem;
-  color: #475569;
-  font-variant-numeric: tabular-nums;
+  align-items: flex-start;
+  gap: 1rem;
+  flex-shrink: 0;
+}
+@media (min-width: 768px) {
+  .detail-header {
+    flex-direction: row;
+  }
 }
 
-.media-player {
-  width: 100%;
-  border-radius: 18px;
-  background: #0f172a;
+.detail-title {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
-.audio-player {
-  min-height: 56px;
-}
-
-.eyebrow {
-  font-size: 0.72rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: #64748b;
-}
-
-.hero-copy h1,
-.viewer-header h2 {
-  margin-top: 0.35rem;
-  font-size: 1.85rem;
-  line-height: 1.08;
-  color: #0f172a;
-}
-
-.lede {
-  margin-top: 0.65rem;
-  color: #475569;
-  line-height: 1.65;
-}
-
-.status-pill {
-  display: inline-flex;
-  width: fit-content;
-  padding: 0.38rem 0.7rem;
-  border-radius: 999px;
-  font-size: 0.76rem;
+.detail-heading {
+  font-size: 1.75rem;
   font-weight: 700;
+  color: #111827;
+  margin: 0;
+  line-height: 1.2;
 }
 
-.status-wait {
-  background: #fef3c7;
-  color: #92400e;
+.detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1rem;
+  font-size: 0.875rem;
+  color: #6b7280;
 }
 
-.status-ready {
+/* Status Badge */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.125rem 0.625rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.status-success {
   background: #dcfce7;
   color: #166534;
 }
+.status-warning {
+  background: #fef9c3;
+  color: #92400e;
+}
+.status-danger {
+  background: #fee2e2;
+  color: #991b1b;
+}
+.status-info {
+  background: #dbeafe;
+  color: #1e40af;
+}
+.status-neutral {
+  background: #f3f4f6;
+  color: #374151;
+}
 
-.drop-zone {
-  display: block;
-  border: 1.5px dashed #cbd5e1;
-  border-radius: 24px;
-  padding: 1.2rem;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(241, 245, 249, 0.85));
+/* Buttons */
+.header-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 1rem;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 500;
   cursor: pointer;
-  transition:
-    transform 0.2s ease,
-    border-color 0.2s ease,
-    background 0.2s ease;
+  transition: all 0.2s;
+  border: 1px solid transparent;
 }
-
-.drop-zone.drag {
-  border-color: #2563eb;
-  background: linear-gradient(180deg, #eff6ff, #dbeafe);
-  transform: translateY(-2px);
-}
-
-.drop-zone.disabled {
-  opacity: 0.55;
+.action-button:disabled {
+  opacity: 0.5;
   cursor: not-allowed;
 }
-
+.button-primary {
+  background-color: #8fa953; /* CF mattya-500 */
+  color: white;
+}
+.button-primary:hover:not(:disabled) {
+  background-color: #738a3f; /* CF mattya-600 */
+}
+.button-secondary {
+  background-color: white;
+  color: #374151;
+  border-color: #d1d5db;
+}
+.button-secondary:hover:not(:disabled) {
+  background-color: #f9fafb;
+}
+.button-ghost {
+  background-color: transparent;
+  color: #4b5563;
+}
+.button-ghost:hover:not(:disabled) {
+  background-color: #f3f4f6;
+}
+.button-sm {
+  padding: 0.25rem 0.75rem;
+  font-size: 0.75rem;
+}
 .hidden-input {
   display: none;
 }
 
-.drop-content {
-  min-height: 150px;
-  display: grid;
-  place-items: center;
-  text-align: center;
+/* Page Banners */
+.page-banner {
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  flex-shrink: 0;
+}
+.banner-danger {
+  background: #fee2e2;
+  color: #991b1b;
+}
+.banner-warning {
+  background: #fef9c3;
+  color: #92400e;
 }
 
-.drop-title {
-  font-size: 1.05rem;
-  font-weight: 700;
-  color: #0f172a;
-}
-
-.drop-subtitle {
-  margin-top: 0.55rem;
-  color: #64748b;
-  line-height: 1.5;
-}
-
-.primary,
-.ghost {
-  border: none;
-  border-radius: 16px;
-  font: inherit;
-  cursor: pointer;
-}
-
-.primary {
-  padding: 0.95rem 1rem;
-  background: linear-gradient(135deg, #0f172a, #2563eb);
-  color: #fff;
-  font-weight: 700;
-}
-
-.primary:disabled,
-.ghost:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.ghost {
-  padding: 0.55rem 0.9rem;
-  background: #eef2ff;
-  color: #3730a3;
-  font-weight: 600;
-}
-
-.progress-wrap {
+/* Content Section (matches content-section in CF) */
+.content-section {
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
+  gap: 1.5rem;
+  flex: 1;
+  min-height: 0; /* Important for scroll */
+}
+@media (min-width: 1024px) {
+  .content-section {
+    flex-direction: row;
+  }
 }
 
-.progress-meta {
+/* Left: Summary Card (mimics CF SummaryCard) */
+.summary-card {
+  background-color: white;
+  border-radius: 1rem;
+  padding: 1.5rem;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  border: 1px solid #f3f4f6;
   display: flex;
-  justify-content: space-between;
-  font-size: 0.82rem;
-  color: #475569;
+  flex-direction: column;
+  width: 100%;
+}
+@media (min-width: 1024px) {
+  .summary-card {
+    flex: 1;
+    max-width: 400px;
+  }
 }
 
-.progress-bar {
-  height: 8px;
-  border-radius: 999px;
-  background: #e2e8f0;
-  overflow: hidden;
-}
-
-.progress-fill {
-  height: 100%;
-  background: linear-gradient(90deg, #2563eb, #22c55e);
-  transition: width 0.25s ease;
-}
-
-.progress-timing {
-  font-size: 0.78rem;
-  color: #64748b;
-  font-variant-numeric: tabular-nums;
-}
-
-.notice {
-  padding: 0.85rem 1rem;
-  border-radius: 16px;
-  font-size: 0.85rem;
-}
-
-.error {
-  background: #fef2f2;
-  color: #b91c1c;
-}
-
-.info {
-  background: #eff6ff;
-  color: #1e40af;
-}
-
-.viewer-header {
+.card-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 1rem;
+  flex-shrink: 0;
 }
 
-.empty-state {
-  border: 1px dashed #cbd5e1;
-  border-radius: 22px;
-  padding: 2rem;
-  color: #64748b;
-}
-
-.transcript-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.65rem;
-  overflow: auto;
-  min-height: 0;
-}
-
-.segment-card {
-  display: flex;
-  flex-direction: column;
-  gap: 0.45rem;
-  padding: 0.85rem 1rem;
-  border-radius: 20px;
-  border: 1px solid #e2e8f0;
-  background: rgba(255, 255, 255, 0.92);
-  transition:
-    border-color 0.2s ease,
-    background 0.2s ease,
-    transform 0.2s ease,
-    box-shadow 0.2s ease;
-}
-
-.segment-card.clickable {
-  cursor: pointer;
-}
-
-.segment-card.clickable:hover {
-  transform: translateY(-1px);
-  border-color: #bfdbfe;
-}
-
-.segment-card.active {
-  border-color: #2563eb;
-  background: linear-gradient(180deg, rgba(239, 246, 255, 0.98), rgba(219, 234, 254, 0.94));
-  box-shadow: 0 14px 30px rgba(37, 99, 235, 0.12);
-}
-
-.segment-meta {
+.card-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #111827;
   display: flex;
   align-items: center;
-  gap: 0.6rem;
+  gap: 0.5rem;
+  margin: 0;
 }
 
-.speaker-badge {
-  display: inline-flex;
-  padding: 0.22rem 0.6rem;
-  border-radius: 999px;
-  font-size: 0.72rem;
-  font-weight: 700;
-  color: #fff;
-  letter-spacing: 0.03em;
+.summary-content {
+  color: #374151;
+  flex: 1;
+  overflow-y: auto;
 }
 
-.timestamp {
+/* Dropzone in Summary */
+.drop-zone {
+  display: block;
+  border: 2px dashed #e5e7eb;
+  border-radius: 0.75rem;
+  padding: 1.5rem;
+  text-align: center;
+  background-color: #f9fafb;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: 1.5rem;
+}
+.drop-zone.drag {
+  border-color: #8fa953;
+  background-color: #f7faf1;
+}
+.drop-zone.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.drop-title {
+  font-weight: 600;
+  color: #111827;
+  margin: 0 0 0.25rem 0;
+}
+.drop-subtitle {
   font-size: 0.75rem;
-  color: #94a3b8;
-  font-variant-numeric: tabular-nums;
+  color: #6b7280;
+  margin: 0;
+}
+
+/* Progress in Summary */
+.progress-container {
+  background: #f9fafb;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  margin-bottom: 1.5rem;
+  border: 1px solid #f3f4f6;
+}
+.flex-between {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.text-sm {
+  font-size: 0.875rem;
+}
+.text-xs {
+  font-size: 0.75rem;
+}
+.text-gray-600 {
+  color: #4b5563;
+}
+.text-gray-500 {
+  color: #6b7280;
+}
+.font-bold {
+  font-weight: 700;
+}
+.mt-2 {
+  margin-top: 0.5rem;
+}
+
+.progress-bar {
+  margin-top: 0.5rem;
+  height: 0.5rem;
+  background-color: #e5e7eb;
+  border-radius: 9999px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background-color: #8fa953; /* CF mattya-500 */
+  transition: width 0.3s ease;
+}
+
+/* Simple Summary Text */
+.simple-summary {
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+.simple-summary p {
+  margin: 0.25rem 0;
+}
+.my-4 {
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+  border: 0;
+  border-top: 1px solid #e5e7eb;
+}
+.simple-summary h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem 0;
+}
+.speaker-simple-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.speaker-simple-list li {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+.speaker-simple-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.speaker-simple-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+.speaker-dot {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 9999px;
+  display: inline-block;
+}
+.speaker-name-input {
+  width: 100%;
+  border: 1px solid #d1d5db;
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  color: #1f2937;
+  background: #fff;
+}
+.speaker-name-input:focus {
+  outline: none;
+  border-color: #8fa953;
+  box-shadow: 0 0 0 3px rgba(143, 169, 83, 0.16);
+}
+
+.empty-text {
+  color: #6b7280;
+  font-size: 0.875rem;
+}
+
+/* Right: Content Right (mimics CF content-right) */
+.content-right {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  width: 100%;
+  min-height: 0; /* Important for scroll */
+}
+@media (min-width: 1024px) {
+  .content-right {
+    flex: 1; /* Takes remaining space */
+  }
+}
+
+/* Media Player */
+.media-player-container {
+  width: 100%;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  background-color: rgba(0, 0, 0, 0.05);
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  flex-shrink: 0;
+}
+.media-player {
+  width: 100%;
+  height: auto;
+  max-height: 300px;
+  object-fit: contain;
+  display: block;
+}
+.audio-player {
+  height: 54px;
+}
+.media-empty {
+  display: none;
+}
+
+/* Transcript Card (mimics CF TranscriptCard) */
+.transcript-container {
+  background-color: white;
+  border-radius: 1rem;
+  padding: 1.5rem;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  border: 1px solid #f3f4f6;
+  flex: 1; /* Fills remaining height */
+  display: flex;
+  flex-direction: column;
+  min-height: 0; /* Important for scroll */
+}
+
+.transcript-header {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #111827;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 1rem 0;
+  flex-shrink: 0;
+}
+
+.header-icon {
+  display: inline-block;
+}
+
+.transcript-body {
+  white-space: pre-wrap;
+  color: #374151;
+  line-height: 1.7;
+  font-size: 0.875rem;
+  background-color: #f9fafb;
+  padding: 1rem;
+  border-radius: 0.75rem;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.transcript-segment {
+  margin-bottom: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+  transition: background-color 0.2s;
+  cursor: pointer;
+}
+.transcript-segment:hover {
+  background-color: #f3f4f6;
+}
+.transcript-segment.active {
+  background-color: #eef4e2; /* CF mattya-100 */
+}
+
+.timestamp-btn {
+  display: inline-block;
+  padding: 0.125rem 0.375rem;
+  background-color: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.25rem;
+  color: #6b7280;
+  font-size: 0.75rem;
+  margin-right: 0.5rem;
+  font-family: monospace;
+}
+.timestamp-btn.active {
+  background-color: #8fa953;
+  color: white;
+  border-color: #8fa953;
+}
+
+.speaker-name {
+  font-weight: 700;
+  margin-right: 0.5rem;
 }
 
 .segment-text {
-  white-space: pre-wrap;
-  word-break: break-word;
-  line-height: 1.9;
-  font-size: 1rem;
-  color: #111827;
-}
-
-@media (max-width: 900px) {
-  .shell {
-    grid-template-columns: 1fr;
-  }
+  color: #1f2937;
 }
 </style>
