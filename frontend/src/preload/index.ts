@@ -16,6 +16,13 @@ export interface UploadResult {
   filename: string
 }
 
+export interface LinkedMediaFile {
+  path: string
+  name: string
+  exists: boolean
+  url: string
+}
+
 export interface TranscribeJobStatus {
   status: 'queued' | 'loading' | 'processing' | 'done' | 'error'
   progress: number
@@ -47,6 +54,7 @@ export interface MinutesRecord {
   id: string
   title: string
   sourceFileName: string
+  sourceFilePath: string | null
   savedAt: string
   recordedAt: string | null
   audioDuration: number
@@ -59,6 +67,7 @@ export interface SaveMinutesInput {
   id?: string
   title: string
   sourceFileName: string
+  sourceFilePath: string | null
   recordedAt: string | null
   audioDuration: number
   processingTime: number | null
@@ -121,6 +130,11 @@ const api = {
       input.click()
     })
   },
+
+  selectLinkedMediaFile: (): Promise<UploadResult | null> => ipcRenderer.invoke('dialog:openLinkedMediaFile'),
+
+  getLinkedMediaFile: (filePath: string): Promise<LinkedMediaFile> =>
+    ipcRenderer.invoke('minutes:getLinkedMediaFile', filePath),
 
   healthCheck: async (): Promise<boolean> => {
     try {

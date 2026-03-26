@@ -11,9 +11,11 @@ import {
 } from 'vue'
 import {
   deleteMinutes,
+  getLinkedMediaFile,
   healthCheck,
   listMinutes,
   saveMinutes,
+  selectLinkedMediaFile,
   transcribeStatus,
   transcribeUpload,
   type MinutesRecord,
@@ -42,10 +44,12 @@ const savedMinutes = ref<MinutesRecord[]>([])
 const currentRecordId = ref<string | null>(null)
 const activeTitle = ref('')
 const sourceFileName = ref('')
+const sourceFilePath = ref<string | null>(null)
 const saveFeedback = ref('')
 const isSaving = ref(false)
 const isLoadingSaved = ref(false)
 const isHydratingRecord = ref(false)
+const mediaLinkState = ref<'none' | 'linked' | 'missing'>('none')
 let speakerNameSaveTimer: ReturnType<typeof window.setTimeout> | null = null
 
 const dateTimeFormatter = new Intl.DateTimeFormat('ja-JP', {
@@ -71,9 +75,18 @@ const visibleSourceFileName = computed(() => {
   return sourceFileName.value
 })
 const isVideoFile = computed(() => {
-  if (!selectedFile.value) return false
-  if (selectedFile.value.type.startsWith('video/')) return true
-  return /\.(mp4|webm|mov|m4v)$/i.test(selectedFile.value.name)
+  if (selectedFile.value?.type.startsWith('video/')) return true
+  return /\.(mp4|webm|mov|m4v)$/i.test(visibleSourceFileName.value)
+})
+const canRelinkMedia = computed(() => !!activeRecord.value && !selectedFile.value)
+const mediaEmptyMessage = computed(() => {
+  if (mediaLinkState.value === 'missing') {
+    return '元の音声・動画ファイルが見つかりません。再選択すると保存済み議事録でも再生できます。'
+  }
+  if (activeRecord.value && !selectedFile.value) {
+    return '元の音声・動画ファイルを関連付けると、保存済み議事録でも再生できます。'
+  }
+  return 'ここに音声または動画プレイヤーが表示されます。'
 })
 const meetingTitle = computed(() => {
   if (activeTitle.value) return activeTitle.value
@@ -258,6 +271,8 @@ function setFile(file: File | null): void {
   currentRecordId.value = null
   activeTitle.value = file ? deriveTitle(file.name) : ''
   sourceFileName.value = file?.name ?? ''
+  sourceFilePath.value = null
+  mediaLinkState.value = file ? 'linked' : 'none'
   saveFeedback.value = ''
   if (file) {
     mediaUrl.value = URL.createObjectURL(file)
@@ -265,10 +280,10 @@ function setFile(file: File | null): void {
 }
 
 function clearMediaUrl(): void {
-  if (mediaUrl.value) {
+  if (mediaUrl.value.startsWith('blob:')) {
     URL.revokeObjectURL(mediaUrl.value)
-    mediaUrl.value = ''
   }
+  mediaUrl.value = ''
 }
 
 function deriveTitle(fileName: string): string {
@@ -321,6 +336,7 @@ async function startTranscription(): Promise<void> {
       if (status.status === 'done' && status.result) {
         result.value = status.result
         sourceFileName.value = selectedFile.value.name
+        sourceFilePath.value = null
         activeTitle.value = deriveTitle(selectedFile.value.name)
         await persistCurrentMinutes(true)
         break
@@ -375,6 +391,7 @@ async function persistCurrentMinutes(isAutoSaved = false): Promise<void> {
       id: currentRecordId.value ?? undefined,
       title: meetingTitle.value,
       sourceFileName: visibleSourceFileName.value || 'unknown',
+      sourceFilePath: sourceFilePath.value,
       recordedAt: selectedAt.value ? selectedAt.value.toISOString() : null,
       audioDuration: result.value.audio_duration,
       processingTime: processingTime.value,
@@ -384,6 +401,7 @@ async function persistCurrentMinutes(isAutoSaved = false): Promise<void> {
     currentRecordId.value = savedRecord.id
     activeTitle.value = savedRecord.title
     sourceFileName.value = savedRecord.sourceFileName
+    sourceFilePath.value = savedRecord.sourceFilePath
     upsertSavedRecord(savedRecord)
     saveFeedback.value = isAutoSaved ? '自動保存しました' : '保存しました'
   } catch (error) {
@@ -404,26 +422,32 @@ function upsertSavedRecord(record: MinutesRecord): void {
 async function loadSavedRecord(record: MinutesRecord): Promise<void> {
   isHydratingRecord.value = true
   isLoadingSaved.value = true
-  clearSpeakerNameSaveTimer()
-  clearMediaUrl()
-  selectedFile.value = null
-  autoStartRequested.value = false
-  result.value = record.result
-  speakerNames.value = { ...record.speakerNames }
-  processingTime.value = record.processingTime
-  selectedAt.value = record.recordedAt ? new Date(record.recordedAt) : null
-  currentRecordId.value = record.id
-  activeTitle.value = record.title
-  sourceFileName.value = record.sourceFileName
-  currentTime.value = 0
-  progress.value = 0
-  progressStage.value = 'done'
-  progressMessage.value = '保存済み議事録を表示中'
-  errorMessage.value = ''
-  saveFeedback.value = `${dateTimeFormatter.format(new Date(record.savedAt))} に保存済み`
-  await nextTick()
-  isLoadingSaved.value = false
-  isHydratingRecord.value = false
+  try {
+    clearSpeakerNameSaveTimer()
+    clearMediaUrl()
+    selectedFile.value = null
+    autoStartRequested.value = false
+    result.value = record.result
+    speakerNames.value = { ...record.speakerNames }
+    processingTime.value = record.processingTime
+    selectedAt.value = record.recordedAt ? new Date(record.recordedAt) : null
+    currentRecordId.value = record.id
+    activeTitle.value = record.title
+    sourceFileName.value = record.sourceFileName
+    sourceFilePath.value = record.sourceFilePath
+    currentTime.value = 0
+    progress.value = 0
+    progressStage.value = 'done'
+    progressMessage.value = '保存済み議事録を表示中'
+    errorMessage.value = ''
+    saveFeedback.value = `${dateTimeFormatter.format(new Date(record.savedAt))} に保存済み`
+    mediaLinkState.value = record.sourceFilePath ? 'missing' : 'none'
+    await restoreLinkedMedia(record)
+    await nextTick()
+  } finally {
+    isLoadingSaved.value = false
+    isHydratingRecord.value = false
+  }
 }
 
 async function removeSavedRecord(record: MinutesRecord): Promise<void> {
@@ -445,12 +469,57 @@ async function removeSavedRecord(record: MinutesRecord): Promise<void> {
         speakerNames.value = {}
         activeTitle.value = ''
         sourceFileName.value = ''
+        sourceFilePath.value = null
         selectedAt.value = null
         processingTime.value = null
+        mediaLinkState.value = 'none'
+        clearMediaUrl()
       }
     }
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '保存データの削除に失敗しました'
+  }
+}
+
+async function restoreLinkedMedia(record: MinutesRecord): Promise<void> {
+  if (!record.sourceFilePath) {
+    mediaLinkState.value = 'none'
+    return
+  }
+
+  try {
+    const linkedMedia = await getLinkedMediaFile(record.sourceFilePath)
+    if (!linkedMedia.exists || !linkedMedia.url) {
+      mediaLinkState.value = 'missing'
+      return
+    }
+    mediaUrl.value = linkedMedia.url
+    sourceFileName.value = linkedMedia.name
+    sourceFilePath.value = linkedMedia.path
+    mediaLinkState.value = 'linked'
+  } catch {
+    mediaLinkState.value = 'missing'
+  }
+}
+
+async function relinkSavedMedia(): Promise<void> {
+  const record = activeRecord.value
+  if (!record) return
+
+  try {
+    const picked = await selectLinkedMediaFile()
+    if (!picked) return
+
+    clearMediaUrl()
+    mediaUrl.value = ''
+    sourceFileName.value = picked.filename
+    sourceFilePath.value = picked.filePath
+    mediaLinkState.value = 'missing'
+    await restoreLinkedMedia({ ...record, sourceFileName: picked.filename, sourceFilePath: picked.filePath })
+    await persistCurrentMinutes(true)
+    saveFeedback.value = '元ファイルを関連付けました'
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : '元ファイルの関連付けに失敗しました'
   }
 }
 
@@ -527,6 +596,14 @@ watch(
       <div class="header-actions">
         <button class="action-button button-secondary" :disabled="!hasResult || isSaving" @click="persistCurrentMinutes()">
           保存
+        </button>
+        <button
+          v-if="canRelinkMedia"
+          class="action-button button-secondary"
+          :disabled="isSaving || isLoadingSaved"
+          @click="relinkSavedMedia"
+        >
+          元ファイルを選択
         </button>
         <label class="action-button button-secondary">
           ファイルを選択
@@ -640,6 +717,7 @@ watch(
                 <button class="saved-main" @click="loadSavedRecord(record)">
                   <strong class="saved-item-title">{{ record.title }}</strong>
                   <span class="saved-item-meta">{{ record.sourceFileName }}</span>
+                  <span v-if="record.sourceFilePath" class="saved-item-meta saved-linked">元ファイル関連付け済み</span>
                   <span class="saved-item-meta">{{ dateTimeFormatter.format(new Date(record.savedAt)) }}</span>
                 </button>
                 <button class="saved-delete" @click="removeSavedRecord(record)">削除</button>
@@ -672,7 +750,17 @@ watch(
             />
           </div>
           <div v-else class="media-empty">
-            <p>保存済み議事録では文字起こし内容のみ再表示します。</p>
+            <div class="media-empty-content">
+              <p>{{ mediaEmptyMessage }}</p>
+              <button
+                v-if="canRelinkMedia"
+                class="action-button button-secondary button-sm"
+                :disabled="isSaving || isLoadingSaved"
+                @click="relinkSavedMedia"
+              >
+                元ファイルを選択
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1155,6 +1243,10 @@ watch(
   color: #6b7280;
 }
 
+.saved-linked {
+  color: #4f6b1f;
+}
+
 .saved-delete {
   align-self: center;
   color: #b91c1c;
@@ -1212,6 +1304,13 @@ watch(
   color: #6b7280;
   font-size: 0.875rem;
   text-align: center;
+}
+
+.media-empty-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
 }
 
 .transcript-container {

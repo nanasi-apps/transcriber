@@ -29,6 +29,7 @@ export interface MinutesRecord {
   id: string
   title: string
   sourceFileName: string
+  sourceFilePath: string | null
   savedAt: string
   recordedAt: string | null
   audioDuration: number
@@ -37,10 +38,18 @@ export interface MinutesRecord {
   speakerNames: Record<string, string>
 }
 
+export interface LinkedMediaFile {
+  path: string
+  name: string
+  exists: boolean
+  url: string
+}
+
 export interface SaveMinutesInput {
   id?: string
   title: string
   sourceFileName: string
+  sourceFilePath: string | null
   recordedAt: string | null
   audioDuration: number
   processingTime: number | null
@@ -117,4 +126,12 @@ export async function saveMinutes(payload: SaveMinutesInput): Promise<MinutesRec
 
 export async function deleteMinutes(id: string): Promise<boolean> {
   return window.api.deleteMinutes(id)
+}
+
+export async function selectLinkedMediaFile(): Promise<{ filePath: string; filename: string } | null> {
+  return window.api.selectLinkedMediaFile()
+}
+
+export async function getLinkedMediaFile(filePath: string): Promise<LinkedMediaFile> {
+  return window.api.getLinkedMediaFile(filePath)
 }

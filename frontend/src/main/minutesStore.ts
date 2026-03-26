@@ -27,6 +27,7 @@ export interface MinutesRecord {
   id: string
   title: string
   sourceFileName: string
+  sourceFilePath: string | null
   savedAt: string
   recordedAt: string | null
   audioDuration: number
@@ -39,6 +40,7 @@ export interface SaveMinutesInput {
   id?: string
   title: string
   sourceFileName: string
+  sourceFilePath: string | null
   recordedAt: string | null
   audioDuration: number
   processingTime: number | null
@@ -51,8 +53,23 @@ interface MinutesStoreFile {
   records: MinutesRecord[]
 }
 
-const STORE_VERSION = 1
+const STORE_VERSION = 2
 const STORE_FILE_NAME = 'minutes-store.json'
+
+function normalizeRecord(record: Partial<MinutesRecord>): MinutesRecord {
+  return {
+    id: typeof record.id === 'string' ? record.id : randomUUID(),
+    title: typeof record.title === 'string' ? record.title : '議事録ビュー',
+    sourceFileName: typeof record.sourceFileName === 'string' ? record.sourceFileName : 'unknown',
+    sourceFilePath: typeof record.sourceFilePath === 'string' ? record.sourceFilePath : null,
+    savedAt: typeof record.savedAt === 'string' ? record.savedAt : new Date().toISOString(),
+    recordedAt: typeof record.recordedAt === 'string' ? record.recordedAt : null,
+    audioDuration: typeof record.audioDuration === 'number' ? record.audioDuration : 0,
+    processingTime: typeof record.processingTime === 'number' ? record.processingTime : null,
+    result: record.result as StoredTranscriptionResult,
+    speakerNames: record.speakerNames && typeof record.speakerNames === 'object' ? record.speakerNames : {},
+  }
+}
 
 function getStorePath(): string {
   return join(app.getPath('userData'), STORE_FILE_NAME)
@@ -64,7 +81,7 @@ async function readStore(): Promise<MinutesStoreFile> {
     const parsed = JSON.parse(raw) as Partial<MinutesStoreFile>
     return {
       version: STORE_VERSION,
-      records: Array.isArray(parsed.records) ? parsed.records : [],
+      records: Array.isArray(parsed.records) ? parsed.records.map((record) => normalizeRecord(record)) : [],
     }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -102,6 +119,7 @@ export async function saveMinutes(input: SaveMinutesInput): Promise<MinutesRecor
     id: input.id ?? randomUUID(),
     title: input.title,
     sourceFileName: input.sourceFileName,
+    sourceFilePath: input.sourceFilePath,
     savedAt,
     recordedAt: input.recordedAt,
     audioDuration: input.audioDuration,
