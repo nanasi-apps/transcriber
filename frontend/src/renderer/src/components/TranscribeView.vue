@@ -5,6 +5,7 @@ import {
   onBeforeUnmount,
   onMounted,
   ref,
+  toRaw,
   type ComponentPublicInstance,
   watch,
 } from 'vue'
@@ -210,6 +211,10 @@ function clearSpeakerNameSaveTimer(): void {
   }
 }
 
+function toPlainData<T>(value: T): T {
+  return structuredClone(toRaw(value))
+}
+
 async function initializeView(): Promise<void> {
   await loadSavedMinutes()
   if (!selectedFile.value && !hasResult.value && savedMinutes.value[0]) {
@@ -373,8 +378,8 @@ async function persistCurrentMinutes(isAutoSaved = false): Promise<void> {
       recordedAt: selectedAt.value ? selectedAt.value.toISOString() : null,
       audioDuration: result.value.audio_duration,
       processingTime: processingTime.value,
-      result: result.value,
-      speakerNames: speakerNames.value,
+      result: toPlainData(result.value),
+      speakerNames: toPlainData(speakerNames.value),
     })
     currentRecordId.value = savedRecord.id
     activeTitle.value = savedRecord.title
