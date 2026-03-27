@@ -1,6 +1,6 @@
 {
   "name": "transcriber",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "MP4 Transcriber - Electron + Vue 3",
   "author": "nanasi-apps",
   "main": "./out/main/index.js",
