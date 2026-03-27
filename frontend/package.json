@@ -2,6 +2,7 @@
   "name": "transcriber",
   "version": "0.1.0",
   "description": "MP4 Transcriber - Electron + Vue 3",
+  "author": "nanasi-apps",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "concurrently -k -n BACKEND,ELECTRON -c blue,cyan \"pnpm dev:backend\" \"pnpm dev:electron\"",

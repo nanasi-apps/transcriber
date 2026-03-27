@@ -1,0 +1,115 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build Release and Update Tap
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Ensure TAP_GITHUB_TOKEN is configured
+        env:
+          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+        run: |
+          if [ -z "${TAP_GITHUB_TOKEN}" ]; then
+            echo "TAP_GITHUB_TOKEN is not set. Add it as an Actions secret with write access to nanasi-apps/homebrew-tap."
+            exit 1
+          fi
+
+      - name: Install frontend dependencies
+        run: pnpm --dir frontend install --frozen-lockfile
+
+      - name: Validate tag and read version
+        id: version
+        run: |
+          VERSION="$(node -p "require('./frontend/package.json').version")"
+          TAG="v${VERSION}"
+
+          if [ "${GITHUB_REF_NAME}" != "${TAG}" ]; then
+            echo "Git tag ${GITHUB_REF_NAME} does not match frontend/package.json version ${TAG}."
+            exit 1
+          fi
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Build macOS distribution
+        run: pnpm --dir frontend build:mac
+
+      - name: Locate dmg artifact
+        id: dmg
+        run: |
+          shopt -s nullglob
+          dmgs=(frontend/dist/*.dmg)
+
+          if [ "${#dmgs[@]}" -eq 0 ]; then
+            echo "No dmg file found in frontend/dist/."
+            exit 1
+          fi
+
+          if [ "${#dmgs[@]}" -gt 1 ]; then
+            echo "Multiple dmg files found in frontend/dist/."
+            printf '%s\n' "${dmgs[@]}"
+            exit 1
+          fi
+
+          echo "path=${dmgs[0]}" >> "$GITHUB_OUTPUT"
+          echo "filename=$(basename "${dmgs[0]}")" >> "$GITHUB_OUTPUT"
+
+      - name: Calculate dmg sha256
+        id: dmg_sha
+        run: |
+          SHA256="$(shasum -a 256 "${{ steps.dmg.outputs.path }}" | cut -d ' ' -f 1)"
+          echo "sha256=${SHA256}" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure release does not already exist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
+            echo "Release ${{ steps.version.outputs.tag }} already exists."
+            echo "To keep release assets immutable, this workflow does not update existing releases."
+            exit 1
+          fi
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          assets=("${{ steps.dmg.outputs.path }}")
+
+          if [ -f "${{ steps.dmg.outputs.path }}.blockmap" ]; then
+            assets+=("${{ steps.dmg.outputs.path }}.blockmap")
+          fi
+
+          gh release create "${{ steps.version.outputs.tag }}" "${assets[@]}" \
+            --title "${{ steps.version.outputs.tag }}" \
+            --notes "Automated release for version ${{ steps.version.outputs.version }}"
+
+      - name: Update Homebrew tap cask
+        env:
+          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+          CASK_VERSION: ${{ steps.version.outputs.version }}
+          CASK_SHA256: ${{ steps.dmg_sha.outputs.sha256 }}
+          CASK_ARTIFACT: ${{ steps.dmg.outputs.filename }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
+        run: ./scripts/update-homebrew-tap.sh

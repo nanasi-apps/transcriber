@@ -1,0 +1,13 @@
+cask "transcriber" do
+  version "{{VERSION}}"
+  sha256 "{{SHA256}}"
+
+  url "https://github.com/{{REPOSITORY}}/releases/download/v#{version}/{{ARTIFACT_FILENAME}}"
+  name "Transcriber"
+  desc "Speaker-attributed transcription desktop app for macOS"
+  homepage "https://github.com/{{REPOSITORY}}"
+
+  depends_on arch: :arm64
+
+  app "Transcriber.app"
+end

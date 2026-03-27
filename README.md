@@ -103,6 +103,20 @@ pnpm --dir frontend build:mac
 ```
 
 ビルド成果物は `frontend/out/` に生成されます。
+ビルド済みの `.dmg` は `frontend/dist/` に生成されます。
+
+---
+
+## Homebrew Cask
+
+GitHub に `v*` タグを push すると、GitHub Releases に arm64 の `.dmg` を公開し、
+`nanasi-apps/homebrew-tap` の cask も自動更新されます。
+
+```bash
+brew install --cask nanasi-apps/tap/transcriber
+```
+
+この自動更新には、Actions secret `TAP_GITHUB_TOKEN` が必要です。
 
 ---
 
