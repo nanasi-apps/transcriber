@@ -15,7 +15,7 @@ import {
   healthCheck,
   listMinutes,
   saveMinutes,
-  selectLinkedMediaFile,
+  storeMinutesMedia,
   transcribeStatus,
   transcribeUpload,
   type MinutesRecord,
@@ -46,6 +46,7 @@ const activeTitle = ref('')
 const sourceFileName = ref('')
 const sourceFilePath = ref<string | null>(null)
 const saveFeedback = ref('')
+const copyFeedback = ref('')
 const isSaving = ref(false)
 const isLoadingSaved = ref(false)
 const isHydratingRecord = ref(false)
@@ -78,13 +79,12 @@ const isVideoFile = computed(() => {
   if (selectedFile.value?.type.startsWith('video/')) return true
   return /\.(mp4|webm|mov|m4v)$/i.test(visibleSourceFileName.value)
 })
-const canRelinkMedia = computed(() => !!activeRecord.value && !selectedFile.value)
 const mediaEmptyMessage = computed(() => {
   if (mediaLinkState.value === 'missing') {
-    return '元の音声・動画ファイルが見つかりません。再選択すると保存済み議事録でも再生できます。'
+    return '保存されている元ファイルが見つかりません。'
   }
   if (activeRecord.value && !selectedFile.value) {
-    return '元の音声・動画ファイルを関連付けると、保存済み議事録でも再生できます。'
+    return '保存済みの元ファイルがあれば、ここで再生できます。'
   }
   return 'ここに音声または動画プレイヤーが表示されます。'
 })
@@ -105,6 +105,11 @@ const saveStatusLabel = computed(() => {
     return `${dateTimeFormatter.format(new Date(activeRecord.value.savedAt))} に保存済み`
   }
   return '未保存'
+})
+const clipboardText = computed(() => {
+  return utterances.value
+    .map((utterance) => `[${formatTime(utterance.start)}] (${displaySpeakerName(utterance.speaker_id)}) ${utterance.text.trim()}`)
+    .join('\n')
 })
 const activeUtteranceIndex = computed(() => {
   const time = currentTime.value
@@ -274,6 +279,7 @@ function setFile(file: File | null): void {
   sourceFilePath.value = null
   mediaLinkState.value = file ? 'linked' : 'none'
   saveFeedback.value = ''
+  copyFeedback.value = ''
   if (file) {
     mediaUrl.value = URL.createObjectURL(file)
   }
@@ -322,6 +328,7 @@ async function startTranscription(): Promise<void> {
   progressMessage.value = 'Uploading file...'
   processingTime.value = null
   saveFeedback.value = ''
+  copyFeedback.value = ''
 
   try {
     const jobId = await transcribeUpload(selectedFile.value, { align: true })
@@ -355,13 +362,6 @@ async function startTranscription(): Promise<void> {
   }
 }
 
-function resultAsText(): string {
-  if (!result.value) return ''
-  return result.value.utterances
-    .map((u) => `[${displaySpeakerName(u.speaker_id)}] (${formatTime(u.start)} - ${formatTime(u.end)})\n${u.text}`)
-    .join('\n\n')
-}
-
 function updateSpeakerName(speakerId: string, value: string): void {
   speakerNames.value = {
     ...speakerNames.value,
@@ -376,9 +376,14 @@ function onSpeakerNameInput(speakerId: string, event: Event): void {
 }
 
 async function copyToClipboard(): Promise<void> {
-  const text = resultAsText()
-  if (text) {
+  const text = clipboardText.value
+  if (!text) return
+
+  try {
     await navigator.clipboard.writeText(text)
+    copyFeedback.value = 'コピーしました'
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : 'クリップボードへのコピーに失敗しました'
   }
 }
 
@@ -387,11 +392,29 @@ async function persistCurrentMinutes(isAutoSaved = false): Promise<void> {
 
   isSaving.value = true
   try {
+    let recordId = currentRecordId.value ?? undefined
+    let persistedSourceFileName = visibleSourceFileName.value || 'unknown'
+    let persistedSourceFilePath = sourceFilePath.value
+
+    if (selectedFile.value && !sourceFilePath.value) {
+      const storedMedia = await storeMinutesMedia({
+        recordId,
+        sourceFileName: selectedFile.value.name,
+        data: await selectedFile.value.arrayBuffer(),
+      })
+      recordId = storedMedia.recordId
+      persistedSourceFileName = storedMedia.sourceFileName
+      persistedSourceFilePath = storedMedia.sourceFilePath
+      sourceFileName.value = storedMedia.sourceFileName
+      sourceFilePath.value = storedMedia.sourceFilePath
+      mediaLinkState.value = 'linked'
+    }
+
     const savedRecord = await saveMinutes({
-      id: currentRecordId.value ?? undefined,
+      id: recordId,
       title: meetingTitle.value,
-      sourceFileName: visibleSourceFileName.value || 'unknown',
-      sourceFilePath: sourceFilePath.value,
+      sourceFileName: persistedSourceFileName,
+      sourceFilePath: persistedSourceFilePath,
       recordedAt: selectedAt.value ? selectedAt.value.toISOString() : null,
       audioDuration: result.value.audio_duration,
       processingTime: processingTime.value,
@@ -441,6 +464,7 @@ async function loadSavedRecord(record: MinutesRecord): Promise<void> {
     progressMessage.value = '保存済み議事録を表示中'
     errorMessage.value = ''
     saveFeedback.value = `${dateTimeFormatter.format(new Date(record.savedAt))} に保存済み`
+    copyFeedback.value = ''
     mediaLinkState.value = record.sourceFilePath ? 'missing' : 'none'
     await restoreLinkedMedia(record)
     await nextTick()
@@ -499,27 +523,6 @@ async function restoreLinkedMedia(record: MinutesRecord): Promise<void> {
     mediaLinkState.value = 'linked'
   } catch {
     mediaLinkState.value = 'missing'
-  }
-}
-
-async function relinkSavedMedia(): Promise<void> {
-  const record = activeRecord.value
-  if (!record) return
-
-  try {
-    const picked = await selectLinkedMediaFile()
-    if (!picked) return
-
-    clearMediaUrl()
-    mediaUrl.value = ''
-    sourceFileName.value = picked.filename
-    sourceFilePath.value = picked.filePath
-    mediaLinkState.value = 'missing'
-    await restoreLinkedMedia({ ...record, sourceFileName: picked.filename, sourceFilePath: picked.filePath })
-    await persistCurrentMinutes(true)
-    saveFeedback.value = '元ファイルを関連付けました'
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '元ファイルの関連付けに失敗しました'
   }
 }
 
@@ -597,14 +600,6 @@ watch(
         <button class="action-button button-secondary" :disabled="!hasResult || isSaving" @click="persistCurrentMinutes()">
           保存
         </button>
-        <button
-          v-if="canRelinkMedia"
-          class="action-button button-secondary"
-          :disabled="isSaving || isLoadingSaved"
-          @click="relinkSavedMedia"
-        >
-          元ファイルを選択
-        </button>
         <label class="action-button button-secondary">
           ファイルを選択
           <input
@@ -627,11 +622,6 @@ watch(
       <div class="summary-card">
         <div class="card-header">
           <h2 class="card-title"><span>📝</span> 要約・情報</h2>
-          <div class="summary-actions">
-            <button class="action-button button-ghost button-sm" :disabled="!hasResult" @click="copyToClipboard">
-              コピー
-            </button>
-          </div>
         </div>
         <div class="summary-content">
           <label
@@ -717,7 +707,7 @@ watch(
                 <button class="saved-main" @click="loadSavedRecord(record)">
                   <strong class="saved-item-title">{{ record.title }}</strong>
                   <span class="saved-item-meta">{{ record.sourceFileName }}</span>
-                  <span v-if="record.sourceFilePath" class="saved-item-meta saved-linked">元ファイル関連付け済み</span>
+                  <span v-if="record.sourceFilePath" class="saved-item-meta saved-linked">元ファイル保存済み</span>
                   <span class="saved-item-meta">{{ dateTimeFormatter.format(new Date(record.savedAt)) }}</span>
                 </button>
                 <button class="saved-delete" @click="removeSavedRecord(record)">削除</button>
@@ -729,11 +719,11 @@ watch(
 
       <div class="content-right">
         <div class="media-player-container">
-          <div v-if="hasMedia">
+          <div v-if="hasMedia" :class="{ 'video-shell': isVideoFile }">
             <video
               v-if="isVideoFile"
               ref="mediaElement"
-              class="media-player"
+              class="media-player video-player"
               :src="mediaUrl"
               controls
               playsinline
@@ -752,20 +742,20 @@ watch(
           <div v-else class="media-empty">
             <div class="media-empty-content">
               <p>{{ mediaEmptyMessage }}</p>
-              <button
-                v-if="canRelinkMedia"
-                class="action-button button-secondary button-sm"
-                :disabled="isSaving || isLoadingSaved"
-                @click="relinkSavedMedia"
-              >
-                元ファイルを選択
-              </button>
             </div>
           </div>
         </div>
 
         <div class="transcript-container">
-          <h2 class="transcript-header"><span class="header-icon">💬</span> 文字起こし</h2>
+          <div class="transcript-header">
+            <h2 class="transcript-title"><span class="header-icon">💬</span> 文字起こし</h2>
+            <div class="summary-actions">
+              <span v-if="copyFeedback" class="copy-feedback">{{ copyFeedback }}</span>
+              <button class="action-button button-ghost button-sm" :disabled="!hasResult" @click="copyToClipboard">
+                コピー
+              </button>
+            </div>
+          </div>
           <div class="transcript-body">
             <div v-if="!hasResult" class="text-gray-500 p-4">アップロード後、話者分離付き文字起こし結果がここに表示されます。</div>
             <template v-else>
@@ -1128,6 +1118,12 @@ watch(
   margin: 0 0 0.5rem 0;
 }
 
+.copy-feedback {
+  font-size: 0.75rem;
+  color: #4f6b1f;
+  font-weight: 600;
+}
+
 .speaker-simple-list {
   list-style: none;
   padding: 0;
@@ -1283,12 +1279,22 @@ watch(
   flex-shrink: 0;
 }
 
+.video-shell {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  max-height: clamp(240px, 32vh, 440px);
+  background: #0f172a;
+}
+
 .media-player {
   width: 100%;
-  height: auto;
-  max-height: 300px;
-  object-fit: contain;
   display: block;
+}
+
+.video-player {
+  height: 100%;
+  object-fit: contain;
+  background: #000;
 }
 
 .audio-player {
@@ -1326,14 +1332,22 @@ watch(
 }
 
 .transcript-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0 0 1rem 0;
+  flex-shrink: 0;
+}
+
+.transcript-title {
   font-size: 1.25rem;
   font-weight: 700;
   color: #111827;
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin: 0 0 1rem 0;
-  flex-shrink: 0;
+  margin: 0;
 }
 
 .header-icon {

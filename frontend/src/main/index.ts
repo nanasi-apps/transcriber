@@ -9,6 +9,7 @@ import {
   getMinutes,
   listMinutes,
   saveMinutes,
+  storeMinutesMedia,
   type SaveMinutesInput,
 } from './minutesStore'
 
@@ -231,26 +232,6 @@ app.whenReady().then(() => {
     return result.canceled ? null : result.filePaths[0]
   })
 
-  ipcMain.handle('dialog:openLinkedMediaFile', async () => {
-    const result = await dialog.showOpenDialog({
-      properties: ['openFile'],
-      filters: [
-        {
-          name: 'Video / Audio',
-          extensions: ['mp4', 'wav', 'mp3', 'm4a', 'webm', 'ogg', 'flac', 'mov', 'm4v'],
-        },
-      ],
-    })
-    if (result.canceled || !result.filePaths[0]) {
-      return null
-    }
-    const filePath = result.filePaths[0]
-    return {
-      filePath,
-      filename: filePath.split(/[/\\]/).pop() ?? filePath,
-    }
-  })
-
   ipcMain.handle('minutes:list', async () => {
     return listMinutes()
   })
@@ -262,6 +243,13 @@ app.whenReady().then(() => {
   ipcMain.handle('minutes:save', async (_, payload: SaveMinutesInput) => {
     return saveMinutes(payload)
   })
+
+  ipcMain.handle(
+    'minutes:storeMedia',
+    async (_, payload: { recordId?: string; sourceFileName: string; data: Uint8Array | ArrayBuffer }) => {
+      return storeMinutesMedia(payload)
+    },
+  )
 
   ipcMain.handle('minutes:delete', async (_, id: string) => {
     return deleteMinutes(id)

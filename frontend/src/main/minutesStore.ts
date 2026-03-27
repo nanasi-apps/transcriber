@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { randomUUID } from 'node:crypto'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { mkdir, readFile, readdir, unlink, writeFile } from 'node:fs/promises'
+import { extname, join } from 'node:path'
 
 export interface StoredWordTimestamp {
   text: string
@@ -48,6 +48,18 @@ export interface SaveMinutesInput {
   speakerNames: Record<string, string>
 }
 
+export interface StoreMinutesMediaInput {
+  recordId?: string
+  sourceFileName: string
+  data: Uint8Array | ArrayBuffer
+}
+
+export interface StoredMinutesMedia {
+  recordId: string
+  sourceFileName: string
+  sourceFilePath: string
+}
+
 interface MinutesStoreFile {
   version: number
   records: MinutesRecord[]
@@ -55,6 +67,7 @@ interface MinutesStoreFile {
 
 const STORE_VERSION = 2
 const STORE_FILE_NAME = 'minutes-store.json'
+const MEDIA_DIR_NAME = 'minutes-media'
 
 function normalizeRecord(record: Partial<MinutesRecord>): MinutesRecord {
   return {
@@ -73,6 +86,39 @@ function normalizeRecord(record: Partial<MinutesRecord>): MinutesRecord {
 
 function getStorePath(): string {
   return join(app.getPath('userData'), STORE_FILE_NAME)
+}
+
+function getMediaDirPath(): string {
+  return join(app.getPath('userData'), MEDIA_DIR_NAME)
+}
+
+function normalizeMediaPayload(data: Uint8Array | ArrayBuffer): Uint8Array {
+  return data instanceof Uint8Array ? data : new Uint8Array(data)
+}
+
+function getManagedMediaPrefix(recordId: string): string {
+  return `${recordId}.`
+}
+
+async function removeManagedMediaFiles(recordId: string): Promise<void> {
+  const mediaDirPath = getMediaDirPath()
+  try {
+    const entries = await readdir(mediaDirPath)
+    const managedPrefix = getManagedMediaPrefix(recordId)
+    await Promise.all(
+      entries
+        .filter((entry) => entry.startsWith(managedPrefix))
+        .map((entry) => unlink(join(mediaDirPath, entry)).catch(() => undefined)),
+    )
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw error
+    }
+  }
+}
+
+function isManagedMediaPath(filePath: string): boolean {
+  return filePath.startsWith(`${getMediaDirPath()}/`) || filePath.startsWith(`${getMediaDirPath()}\\`)
 }
 
 async function readStore(): Promise<MinutesStoreFile> {
@@ -139,13 +185,35 @@ export async function saveMinutes(input: SaveMinutesInput): Promise<MinutesRecor
   return record
 }
 
+export async function storeMinutesMedia(input: StoreMinutesMediaInput): Promise<StoredMinutesMedia> {
+  const recordId = input.recordId ?? randomUUID()
+  const sourceFileName = input.sourceFileName || 'unknown'
+  const extension = extname(sourceFileName) || '.bin'
+  const mediaDirPath = getMediaDirPath()
+  const targetPath = join(mediaDirPath, `${recordId}${extension.toLowerCase()}`)
+
+  await mkdir(mediaDirPath, { recursive: true })
+  await removeManagedMediaFiles(recordId)
+  await writeFile(targetPath, normalizeMediaPayload(input.data))
+
+  return {
+    recordId,
+    sourceFileName,
+    sourceFilePath: targetPath,
+  }
+}
+
 export async function deleteMinutes(id: string): Promise<boolean> {
   const store = await readStore()
+  const deletedRecord = store.records.find((record) => record.id === id) ?? null
   const nextRecords = store.records.filter((record) => record.id !== id)
   if (nextRecords.length === store.records.length) {
     return false
   }
 
   await writeStore({ version: STORE_VERSION, records: sortRecords(nextRecords) })
+  if (deletedRecord?.sourceFilePath && isManagedMediaPath(deletedRecord.sourceFilePath)) {
+    await removeManagedMediaFiles(id)
+  }
   return true
 }

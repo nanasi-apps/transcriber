@@ -63,6 +63,12 @@ export interface MinutesRecord {
   speakerNames: Record<string, string>
 }
 
+export interface StoredMinutesMedia {
+  recordId: string
+  sourceFileName: string
+  sourceFilePath: string
+}
+
 export interface SaveMinutesInput {
   id?: string
   title: string
@@ -131,8 +137,6 @@ const api = {
     })
   },
 
-  selectLinkedMediaFile: (): Promise<UploadResult | null> => ipcRenderer.invoke('dialog:openLinkedMediaFile'),
-
   getLinkedMediaFile: (filePath: string): Promise<LinkedMediaFile> =>
     ipcRenderer.invoke('minutes:getLinkedMediaFile', filePath),
 
@@ -151,6 +155,12 @@ const api = {
 
   saveMinutes: (payload: SaveMinutesInput): Promise<MinutesRecord> =>
     ipcRenderer.invoke('minutes:save', payload),
+
+  storeMinutesMedia: (payload: {
+    recordId?: string
+    sourceFileName: string
+    data: Uint8Array | ArrayBuffer
+  }): Promise<StoredMinutesMedia> => ipcRenderer.invoke('minutes:storeMedia', payload),
 
   deleteMinutes: (id: string): Promise<boolean> => ipcRenderer.invoke('minutes:delete', id),
 }

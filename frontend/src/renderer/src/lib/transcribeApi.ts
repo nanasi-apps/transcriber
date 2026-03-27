@@ -45,6 +45,12 @@ export interface LinkedMediaFile {
   url: string
 }
 
+export interface StoredMinutesMedia {
+  recordId: string
+  sourceFileName: string
+  sourceFilePath: string
+}
+
 export interface SaveMinutesInput {
   id?: string
   title: string
@@ -124,12 +130,16 @@ export async function saveMinutes(payload: SaveMinutesInput): Promise<MinutesRec
   return window.api.saveMinutes(payload)
 }
 
-export async function deleteMinutes(id: string): Promise<boolean> {
-  return window.api.deleteMinutes(id)
+export async function storeMinutesMedia(payload: {
+  recordId?: string
+  sourceFileName: string
+  data: Uint8Array | ArrayBuffer
+}): Promise<StoredMinutesMedia> {
+  return window.api.storeMinutesMedia(payload)
 }
 
-export async function selectLinkedMediaFile(): Promise<{ filePath: string; filename: string } | null> {
-  return window.api.selectLinkedMediaFile()
+export async function deleteMinutes(id: string): Promise<boolean> {
+  return window.api.deleteMinutes(id)
 }
 
 export async function getLinkedMediaFile(filePath: string): Promise<LinkedMediaFile> {
