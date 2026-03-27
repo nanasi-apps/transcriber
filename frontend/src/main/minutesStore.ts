@@ -80,7 +80,8 @@ function normalizeRecord(record: Partial<MinutesRecord>): MinutesRecord {
     audioDuration: typeof record.audioDuration === 'number' ? record.audioDuration : 0,
     processingTime: typeof record.processingTime === 'number' ? record.processingTime : null,
     result: record.result as StoredTranscriptionResult,
-    speakerNames: record.speakerNames && typeof record.speakerNames === 'object' ? record.speakerNames : {},
+    speakerNames:
+      record.speakerNames && typeof record.speakerNames === 'object' ? record.speakerNames : {},
   }
 }
 
@@ -118,7 +119,9 @@ async function removeManagedMediaFiles(recordId: string): Promise<void> {
 }
 
 function isManagedMediaPath(filePath: string): boolean {
-  return filePath.startsWith(`${getMediaDirPath()}/`) || filePath.startsWith(`${getMediaDirPath()}\\`)
+  return (
+    filePath.startsWith(`${getMediaDirPath()}/`) || filePath.startsWith(`${getMediaDirPath()}\\`)
+  )
 }
 
 async function readStore(): Promise<MinutesStoreFile> {
@@ -127,7 +130,9 @@ async function readStore(): Promise<MinutesStoreFile> {
     const parsed = JSON.parse(raw) as Partial<MinutesStoreFile>
     return {
       version: STORE_VERSION,
-      records: Array.isArray(parsed.records) ? parsed.records.map((record) => normalizeRecord(record)) : [],
+      records: Array.isArray(parsed.records)
+        ? parsed.records.map((record) => normalizeRecord(record))
+        : [],
     }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
@@ -185,7 +190,9 @@ export async function saveMinutes(input: SaveMinutesInput): Promise<MinutesRecor
   return record
 }
 
-export async function storeMinutesMedia(input: StoreMinutesMediaInput): Promise<StoredMinutesMedia> {
+export async function storeMinutesMedia(
+  input: StoreMinutesMediaInput,
+): Promise<StoredMinutesMedia> {
   const recordId = input.recordId ?? randomUUID()
   const sourceFileName = input.sourceFileName || 'unknown'
   const extension = extname(sourceFileName) || '.bin'

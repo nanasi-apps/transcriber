@@ -108,7 +108,10 @@ const saveStatusLabel = computed(() => {
 })
 const clipboardText = computed(() => {
   return utterances.value
-    .map((utterance) => `[${formatTime(utterance.start)}] (${displaySpeakerName(utterance.speaker_id)}) ${utterance.text.trim()}`)
+    .map(
+      (utterance) =>
+        `[${formatTime(utterance.start)}] (${displaySpeakerName(utterance.speaker_id)}) ${utterance.text.trim()}`,
+    )
     .join('\n')
 })
 const activeUtteranceIndex = computed(() => {
@@ -147,7 +150,16 @@ onBeforeUnmount(() => {
   clearSpeakerNameSaveTimer()
 })
 
-const SPEAKER_COLORS = ['#2563eb', '#dc2626', '#059669', '#d97706', '#7c3aed', '#db2777', '#0891b2', '#65a30d']
+const SPEAKER_COLORS = [
+  '#2563eb',
+  '#dc2626',
+  '#059669',
+  '#d97706',
+  '#7c3aed',
+  '#db2777',
+  '#0891b2',
+  '#65a30d',
+]
 
 const speakerColorMap = computed<Record<string, string>>(() => {
   const map: Record<string, string> = {}
@@ -256,7 +268,8 @@ async function loadSavedMinutes(): Promise<void> {
   try {
     savedMinutes.value = await listMinutes()
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '保存済み議事録の読み込みに失敗しました'
+    errorMessage.value =
+      error instanceof Error ? error.message : '保存済み議事録の読み込みに失敗しました'
   }
 }
 
@@ -383,7 +396,8 @@ async function copyToClipboard(): Promise<void> {
     await navigator.clipboard.writeText(text)
     copyFeedback.value = 'コピーしました'
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'クリップボードへのコピーに失敗しました'
+    errorMessage.value =
+      error instanceof Error ? error.message : 'クリップボードへのコピーに失敗しました'
   }
 }
 
@@ -573,7 +587,8 @@ watch([selectedFile, backendReady], ([file, ready]) => {
 watch(
   speakerNames,
   () => {
-    if (isHydratingRecord.value || !result.value || isTranscribing.value || !currentRecordId.value) return
+    if (isHydratingRecord.value || !result.value || isTranscribing.value || !currentRecordId.value)
+      return
     clearSpeakerNameSaveTimer()
     speakerNameSaveTimer = window.setTimeout(() => {
       void persistCurrentMinutes(true)
@@ -591,13 +606,19 @@ watch(
         <div class="detail-meta">
           <span>{{ recordedAtLabel }}</span>
           <span v-if="visibleSourceFileName">{{ visibleSourceFileName }}</span>
-          <span class="status-badge" :class="`status-${statusBadge.tone}`">{{ statusBadge.label }}</span>
+          <span class="status-badge" :class="`status-${statusBadge.tone}`">{{
+            statusBadge.label
+          }}</span>
           <span v-if="hasResult" class="save-badge">{{ saveStatusLabel }}</span>
         </div>
       </div>
 
       <div class="header-actions">
-        <button class="action-button button-secondary" :disabled="!hasResult || isSaving" @click="persistCurrentMinutes()">
+        <button
+          class="action-button button-secondary"
+          :disabled="!hasResult || isSaving"
+          @click="persistCurrentMinutes()"
+        >
           保存
         </button>
         <label class="action-button button-secondary">
@@ -641,7 +662,9 @@ watch(
             <div class="drop-content">
               <p v-if="!selectedFile" class="drop-title">音声・動画ファイルをドロップ</p>
               <p v-else class="drop-title">{{ selectedFile.name }}</p>
-              <p class="drop-subtitle">対応形式: mp4 / mp3 / wav / m4a ... 選択後、自動で開始します。</p>
+              <p class="drop-subtitle">
+                対応形式: mp4 / mp3 / wav / m4a ... 選択後、自動で開始します。
+              </p>
             </div>
           </label>
 
@@ -653,7 +676,9 @@ watch(
             <div class="progress-bar">
               <div class="progress-fill" :style="{ width: `${progress}%` }" />
             </div>
-            <p v-if="processingTime !== null" class="text-xs text-gray-500 mt-2">経過時間: {{ formatProcessingTime(processingTime) }}</p>
+            <p v-if="processingTime !== null" class="text-xs text-gray-500 mt-2">
+              経過時間: {{ formatProcessingTime(processingTime) }}
+            </p>
           </div>
 
           <div v-if="hasResult" class="simple-summary prose">
@@ -662,8 +687,13 @@ watch(
               {{ visibleSourceFileName || '--' }}
               <template v-if="selectedFile">({{ formatBytes(selectedFile.size) }})</template>
             </p>
-            <p><strong>収録時間:</strong> {{ result ? formatTime(result.audio_duration) : '--' }}</p>
-            <p><strong>処理時間:</strong> {{ processingTime !== null ? formatProcessingTime(processingTime) : '--' }}</p>
+            <p>
+              <strong>収録時間:</strong> {{ result ? formatTime(result.audio_duration) : '--' }}
+            </p>
+            <p>
+              <strong>処理時間:</strong>
+              {{ processingTime !== null ? formatProcessingTime(processingTime) : '--' }}
+            </p>
             <p><strong>発話数:</strong> {{ utterances.length }} 件</p>
             <p><strong>話者数:</strong> {{ speakerSummaries.length }} 名</p>
 
@@ -689,26 +719,37 @@ watch(
               </li>
             </ul>
           </div>
-          <div v-else-if="!isTranscribing" class="empty-text">ここにファイル情報や文字起こしのサマリーが表示されます。</div>
+          <div v-else-if="!isTranscribing" class="empty-text">
+            ここにファイル情報や文字起こしのサマリーが表示されます。
+          </div>
 
           <div class="saved-section">
             <div class="saved-header">
               <h3 class="saved-title">保存済み議事録</h3>
               <span class="saved-count">{{ savedMinutes.length }}件</span>
             </div>
-            <div v-if="savedMinutes.length === 0" class="saved-empty">まだ保存された議事録はありません。</div>
+            <div v-if="savedMinutes.length === 0" class="saved-empty">
+              まだ保存された議事録はありません。
+            </div>
             <div v-else class="saved-list">
               <article
                 v-for="record in savedMinutes"
                 :key="record.id"
                 class="saved-item"
-                :class="{ active: record.id === currentRecordId, loading: isLoadingSaved && record.id === currentRecordId }"
+                :class="{
+                  active: record.id === currentRecordId,
+                  loading: isLoadingSaved && record.id === currentRecordId,
+                }"
               >
                 <button class="saved-main" @click="loadSavedRecord(record)">
                   <strong class="saved-item-title">{{ record.title }}</strong>
                   <span class="saved-item-meta">{{ record.sourceFileName }}</span>
-                  <span v-if="record.sourceFilePath" class="saved-item-meta saved-linked">元ファイル保存済み</span>
-                  <span class="saved-item-meta">{{ dateTimeFormatter.format(new Date(record.savedAt)) }}</span>
+                  <span v-if="record.sourceFilePath" class="saved-item-meta saved-linked"
+                    >元ファイル保存済み</span
+                  >
+                  <span class="saved-item-meta">{{
+                    dateTimeFormatter.format(new Date(record.savedAt))
+                  }}</span>
                 </button>
                 <button class="saved-delete" @click="removeSavedRecord(record)">削除</button>
               </article>
@@ -751,13 +792,19 @@ watch(
             <h2 class="transcript-title"><span class="header-icon">💬</span> 文字起こし</h2>
             <div class="summary-actions">
               <span v-if="copyFeedback" class="copy-feedback">{{ copyFeedback }}</span>
-              <button class="action-button button-ghost button-sm" :disabled="!hasResult" @click="copyToClipboard">
+              <button
+                class="action-button button-ghost button-sm"
+                :disabled="!hasResult"
+                @click="copyToClipboard"
+              >
                 コピー
               </button>
             </div>
           </div>
           <div class="transcript-body">
-            <div v-if="!hasResult" class="text-gray-500 p-4">アップロード後、話者分離付き文字起こし結果がここに表示されます。</div>
+            <div v-if="!hasResult" class="text-gray-500 p-4">
+              アップロード後、話者分離付き文字起こし結果がここに表示されます。
+            </div>
             <template v-else>
               <div
                 v-for="(utt, idx) in utterances"
@@ -770,7 +817,9 @@ watch(
                 <span class="timestamp-btn" :class="{ active: idx === activeUtteranceIndex }">
                   {{ formatTime(utt.start) }}~{{ formatTime(utt.end) }}
                 </span>
-                <span class="speaker-name" :style="{ color: speakerColorMap[utt.speaker_id] }">[{{ displaySpeakerName(utt.speaker_id) }}]</span>
+                <span class="speaker-name" :style="{ color: speakerColorMap[utt.speaker_id] }"
+                  >[{{ displaySpeakerName(utt.speaker_id) }}]</span
+                >
                 <span class="segment-text">{{ utt.text }}</span>
               </div>
             </template>

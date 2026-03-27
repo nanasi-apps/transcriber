@@ -38,7 +38,10 @@ function decodeMediaFileUrl(requestUrl: string): string {
   return path ? decodeURIComponent(path) : ''
 }
 
-function parseRangeHeader(rangeHeader: string, size: number): { start: number; end: number } | null {
+function parseRangeHeader(
+  rangeHeader: string,
+  size: number,
+): { start: number; end: number } | null {
   const match = /^bytes=(\d*)-(\d*)$/i.exec(rangeHeader.trim())
   if (!match) return null
 
@@ -246,7 +249,10 @@ app.whenReady().then(() => {
 
   ipcMain.handle(
     'minutes:storeMedia',
-    async (_, payload: { recordId?: string; sourceFileName: string; data: Uint8Array | ArrayBuffer }) => {
+    async (
+      _,
+      payload: { recordId?: string; sourceFileName: string; data: Uint8Array | ArrayBuffer },
+    ) => {
       return storeMinutesMedia(payload)
     },
   )
