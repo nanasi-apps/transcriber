@@ -34,7 +34,10 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="Transcriber API",
     version="0.2.0",
-    description="Speaker-attributed transcription: Whisper MLX ASR + MLX forced alignment + pyannote diarization",
+    description=(
+        "Speaker-attributed transcription: Whisper MLX ASR + "
+        "MLX forced alignment + pyannote diarization"
+    ),
 )
 
 app.add_middleware(

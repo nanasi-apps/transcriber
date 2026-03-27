@@ -104,7 +104,8 @@ class DiarizationEngine:
             logger.exception("Failed to load diarization pipeline %s", self.model_name)
             raise RuntimeError(
                 "Failed to load pyannote diarization pipeline. See logs for details. "
-                "Common causes: missing/invalid HF_TOKEN, network issues, or incompatible torch/cuda runtime."
+                "Common causes: missing/invalid HF_TOKEN, network issues, "
+                "or incompatible torch/cuda runtime."
             ) from exc
         else:
             if on_progress is not None:

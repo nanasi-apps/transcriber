@@ -224,7 +224,7 @@ class AlignerEngine:
 
         for segment in segments:
             segment_chars = len(segment.text.strip())
-            candidate = current + [segment]
+            candidate = [*current, segment]
             candidate_duration = candidate[-1].end - candidate[0].start
             candidate_chars = current_chars + segment_chars
 

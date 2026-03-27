@@ -37,15 +37,14 @@ from .schema import (
     WordTimestamp,
 )
 
-
 _SHORT_TURN_SECONDS = 0.35
 _BRIDGED_TURN_SECONDS = 1.0
 _SHORT_WORD_RUN_SECONDS = 0.8
 _SHORT_WORD_RUN_WORDS = 2
 _LONG_WORD_RUN_SECONDS = 3.0
 _LONG_WORD_RUN_WORDS = 8
-_TERMINAL_PUNCTUATION = ("。", "！", "？", "!", "?", "\n")
-_SOFT_PUNCTUATION = ("、", "，", ",", "；", ";", "：", ":")
+_TERMINAL_PUNCTUATION = ("\u3002", "\uff01", "\uff1f", "!", "?", "\n")
+_SOFT_PUNCTUATION = ("\u3001", "\uff0c", ",", "\uff1b", ";", "\uff1a", ":")
 _MIN_SPLIT_CHARS = 30
 _TARGET_SPLIT_CHARS = 70
 _HARD_SPLIT_CHARS = 110

@@ -10,6 +10,7 @@ error() { echo -e "\033[1;31m[ERROR]\033[0m $*" >&2; exit 1; }
 # ── 前提条件チェック ──────────────────────────────────────────
 command -v uv   >/dev/null 2>&1 || error "uv が見つかりません。setup.sh を先に実行してください。"
 command -v pnpm >/dev/null 2>&1 || error "pnpm が見つかりません。setup.sh を先に実行してください。"
+command -v ffmpeg >/dev/null 2>&1 || error "ffmpeg が見つかりません。setup.sh を先に実行してください。"
 
 # ── .env.local チェック ───────────────────────────────────────
 if [ ! -f "$ROOT/.env.local" ]; then

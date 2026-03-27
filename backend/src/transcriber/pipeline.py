@@ -19,8 +19,8 @@ from pathlib import Path
 
 import torch
 
-from .aligner import AlignerEngine, DEFAULT_ALIGNER_MODEL
-from .asr import AsrEngine, DEFAULT_WHISPER_MODEL
+from .aligner import DEFAULT_ALIGNER_MODEL, AlignerEngine
+from .asr import DEFAULT_WHISPER_MODEL, AsrEngine
 from .audio import ensure_wav, get_audio_duration
 from .diarization import DiarizationEngine
 from .memory import release_torch_memory

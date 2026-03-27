@@ -25,8 +25,8 @@ import logging
 import sys
 from pathlib import Path
 
-from .asr import DEFAULT_WHISPER_MODEL
 from .aligner import DEFAULT_ALIGNER_MODEL
+from .asr import DEFAULT_WHISPER_MODEL
 
 
 def build_parser() -> argparse.ArgumentParser:

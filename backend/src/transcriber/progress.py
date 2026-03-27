@@ -5,7 +5,6 @@ import threading
 import time
 from collections.abc import Callable
 
-
 ProgressFn = Callable[[int, str], None]
 MessageFactory = Callable[[float], str]
 
