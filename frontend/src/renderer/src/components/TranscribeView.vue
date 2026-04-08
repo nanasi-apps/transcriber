@@ -994,6 +994,7 @@ watch(
   gap: 1.5rem;
   flex: 1;
   min-height: 0;
+  overflow: hidden;
 }
 
 @media (min-width: 1024px) {
@@ -1011,6 +1012,7 @@ watch(
   display: flex;
   flex-direction: column;
   width: 100%;
+  min-width: 0;
 }
 
 @media (min-width: 1024px) {
@@ -1310,6 +1312,7 @@ watch(
   gap: 1.5rem;
   width: 100%;
   min-height: 0;
+  min-width: 0;
 }
 
 @media (min-width: 1024px) {
